@@ -1,0 +1,141 @@
+{
+  "name": "agent4",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "Order",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-960, -32],
+      "id": "webhook",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:11434/api/generate",
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Content-Type\": \"application/json\"}",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "jsonBody": "={\"model\": \"llama3\",\"prompt\": \"أنت نظام لمطعم. حول طلب الزبون إلى JSON فقط بدون أي كلام إضافي.\\n\\nالطلب:\\n{{ $json.body.massage }}\\n\\nالصيغة المطلوبة:\\n{\\n  \\\"items\\\": [\\n    {\\\"name\\\": \\\"اسم الاكلة\\\", \\\"qty\\\": رقم}\\n  ]\\n}\",\"stream\": false}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-800, -192],
+      "id": "ai",
+      "name": "AI Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.response;\nconst match = text.match(/\\{[\\s\\S]*\\}/);\nif (match) {\n  return [{ json: JSON.parse(match[0]) }];\n}\nreturn [{ json: { error: \"No JSON found\" } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-650, -50],
+      "id": "parse",
+      "name": "Parse JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "let items = $json.items;\nif (typeof items === \"string\") {\n  try { items = JSON.parse(items); } catch { items = []; }\n}\nlet total = 0;\nitems.forEach(i => total += (i.qty || 0) * 3);\nreturn [{ json: { ...$json, prepTime: total } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, -190],
+      "id": "calc",
+      "name": "Calculate Time"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "value": "YOUR_SHEET_ID"
+        },
+        "sheetName": {
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "OrderID": "={{ Date.now() }}",
+            "Items": "={{ JSON.stringify($json[\"items\"]) }}",
+            "Time": "={{ new Date().toLocaleString() }}",
+            "Status": "Pending",
+            "prepTime": "={{ $json.prepTime }}"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [-350, -50],
+      "id": "sheet",
+      "name": "Save to Sheet"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/ACCOUNT_SID/Messages.json",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "To",
+              "value": "whatsapp:+XXXXXXXXXXX"
+            },
+            {
+              "name": "From",
+              "value": "whatsapp:+XXXXXXXXXXX"
+            },
+            {
+              "name": "Body",
+              "value": "={{\"طلب جديد:\\n\" + JSON.stringify($json.items) + \"\\nالوقت: \" + $json.prepTime}}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-200, -190],
+      "id": "notify",
+      "name": "Send WhatsApp"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{\"تم استلام طلبك. وقت التحضير: \" + $json.prepTime + \" دقيقة\"}}"
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-50, -50],
+      "id": "response",
+      "name": "Response"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "AI Request", "type": "main", "index": 0 }]]
+    },
+    "AI Request": {
+      "main": [[{ "node": "Parse JSON", "type": "main", "index": 0 }]]
+    },
+    "Parse JSON": {
+      "main": [[{ "node": "Calculate Time", "type": "main", "index": 0 }]]
+    },
+    "Calculate Time": {
+      "main": [[{ "node": "Save to Sheet", "type": "main", "index": 0 }]]
+    },
+    "Save to Sheet": {
+      "main": [[{ "node": "Send WhatsApp", "type": "main", "index": 0 }]]
+    },
+    "Send WhatsApp": {
+      "main": [[{ "node": "Response", "type": "main", "index": 0 }]]
+    }
+  }
+}
